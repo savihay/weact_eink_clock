@@ -74,6 +74,11 @@ void ntpTimeSyncCallback(struct timeval* tv) {
 // we skip the window so we don't burn battery on every minute.
 bool isColdBoot = true;
 
+// Set true by ArduinoOTA.onStart when an upload begins; the OTA window
+// loop won't exit on timeout while this is set, so a transfer that starts
+// near the end of the window can still complete.
+volatile bool otaInProgress = false;
+
 // ==========================================
 // Forward declarations
 // ==========================================
@@ -337,9 +342,11 @@ void runOtaWindow(uint32_t durationMs) {
 
   ArduinoOTA.setHostname("WeAct-Clock");
   ArduinoOTA.onStart([]() {
+    otaInProgress = true;
     logInfo("OTA: upload starting...");
   });
   ArduinoOTA.onEnd([]() {
+    otaInProgress = false;
     logInfo("OTA: upload complete, rebooting");
   });
   ArduinoOTA.onProgress([](unsigned int p, unsigned int t) {
@@ -351,6 +358,7 @@ void runOtaWindow(uint32_t durationMs) {
     }
   });
   ArduinoOTA.onError([](ota_error_t err) {
+    otaInProgress = false;
     logErrorf("OTA error %u", (unsigned)err);
   });
   ArduinoOTA.begin();
@@ -358,8 +366,11 @@ void runOtaWindow(uint32_t durationMs) {
   logInfof("OTA window open for %u ms — listening for upload at %s",
            durationMs, lastKnownIPbuf);
 
+  // Keep handling while either the timeout window is still open, OR an OTA
+  // upload is mid-transfer (so a transfer that started at t=7 s can still
+  // finish even though the binary takes ~12 s to send).
   uint32_t start = millis();
-  while (millis() - start < durationMs) {
+  while ((millis() - start < durationMs) || otaInProgress) {
     ArduinoOTA.handle();
     server.handleClient();
     WebSerial.loop();
