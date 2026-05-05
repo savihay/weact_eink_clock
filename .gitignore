@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+._*
+
+# Vendor reference code (kept locally, not committed)
+Weact_Example/
+
+# Arduino build artifacts
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude Code per-machine state
+.claude/settings.local.json
+.claude/local/
