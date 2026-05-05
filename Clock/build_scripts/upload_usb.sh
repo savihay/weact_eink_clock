@@ -52,3 +52,10 @@ ELAPSED=$((END_TIME - START_TIME))
 echo ""
 echo "✅ USB upload successful!"
 echo "⏱️  Upload time: ${ELAPSED}s"
+
+# Bump version.h so the next build (and the version on screen after that
+# next flash) carries a fresh number.
+echo ""
+echo "Incrementing version..."
+source "$SCRIPT_DIR/bump_version.sh"
+bump_version "$PROJECT_PATH/version.h"

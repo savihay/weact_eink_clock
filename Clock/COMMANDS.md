@@ -7,8 +7,8 @@ All paths are relative to `Clock/`. Scripts live in `build_scripts/`.
 | Command | What it does |
 |---------|--------------|
 | `./build_scripts/compile.sh` | Compiles the sketch with `arduino-cli` for the C6 FQBN. Output: `build/Clock.ino.bin`. |
-| `./build_scripts/upload_usb.sh [--no-build]` | **Builds** (calls `compile.sh`), then flashes via USB. Auto-detects port (`/dev/cu.usbmodem*` then `/dev/cu.usbserial-*`). |
-| `./build_scripts/upload.sh <ip> [--no-build]` | **Builds** (after reachability check), then flashes via OTA. Auto-bumps `version.h` patch on success. **Must run within the 8 s OTA window.** |
+| `./build_scripts/upload_usb.sh [--no-build]` | **Builds** (calls `compile.sh`), then flashes via USB. Auto-detects port. **Auto-bumps `version.h` patch on success.** |
+| `./build_scripts/upload.sh <ip> [--no-build]` | **Builds** (after reachability check), then flashes via OTA. **Auto-bumps `version.h` patch on success.** **Must run within the 8 s OTA window.** |
 | `./build_scripts/monitor.sh` | Opens the serial monitor at 115200 baud on the same port USB upload uses. Ctrl-C to exit. |
 
 Both `upload_usb.sh` and `upload.sh` build by default. Pass `--no-build` (or set `NO_BUILD=1`) to skip compilation and flash whatever's already in `build/`.

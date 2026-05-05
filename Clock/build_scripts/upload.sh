@@ -72,21 +72,10 @@ python3 "$ESPOTA" -i "$DEVICE_IP" -p 3232 -f "$BIN_FILE"
 END_TIME=$(date +%s)
 echo "⏱️  Upload completed in $((END_TIME - START_TIME)) seconds"
 
-# Increment version in version.h
-VERSION_FILE="$PROJECT_PATH/version.h"
-if [ -f "$VERSION_FILE" ]; then
-    echo ""
-    echo "Incrementing version..."
-    CURRENT_VERSION=$(grep -o 'FIRMWARE_VERSION "[0-9]*\.[0-9]*\.[0-9]*"' "$VERSION_FILE" | grep -o '[0-9]*\.[0-9]*\.[0-9]*')
-    if [ -n "$CURRENT_VERSION" ]; then
-        MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
-        MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
-        PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
-        NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
-        sed -i '' "s/FIRMWARE_VERSION \"$CURRENT_VERSION\"/FIRMWARE_VERSION \"$NEW_VERSION\"/" "$VERSION_FILE"
-        echo "   Version: $CURRENT_VERSION → $NEW_VERSION"
-    fi
-fi
+echo ""
+echo "Incrementing version..."
+source "$SCRIPT_DIR/bump_version.sh"
+bump_version "$PROJECT_PATH/version.h"
 
 echo ""
 echo "✅ Upload successful! Device should reboot now."
