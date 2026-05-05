@@ -24,7 +24,9 @@ static void logWithLevel(LogLevel level, const char* levelStr, const String& msg
     if (level > currentLogLevel) return;
 
     String formatted = "[" + getTimestamp() + "] [" + levelStr + "] " + msg;
+#if !PRODUCTION_MODE
     Serial.println(formatted);
+#endif
     if (WebSerial.isInitialized()) {
         WebSerial.println(formatted);
     }
@@ -43,7 +45,9 @@ static void logWithLevelf(LogLevel level, const char* levelStr, const char* form
     }
 
     String formatted = "[" + getTimestamp() + "] [" + levelStr + "] " + String(msgBuf);
+#if !PRODUCTION_MODE
     Serial.println(formatted);
+#endif
     if (WebSerial.isInitialized()) {
         WebSerial.println(formatted);
     }

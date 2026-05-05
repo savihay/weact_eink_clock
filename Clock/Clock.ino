@@ -19,6 +19,7 @@
 #include <ArduinoOTA.h>
 #include <esp_sntp.h>
 #include <esp_task_wdt.h>
+#include <esp_bt.h>
 #include <time.h>
 #include <sys/time.h>
 
@@ -57,11 +58,11 @@ RTC_DATA_ATTR bool   timeValid            = false;
 // driftRateUsPerSec: positive = RTC runs fast; used by goToSleep() to
 // scale the requested deep-sleep duration so we wake near the real minute.
 RTC_DATA_ATTR float  driftRateUsPerSec    = 0.0f;
-
-String lastKnownIP = "0.0.0.0";
+// Persist the last-known IP across deep sleep so the footer renders correctly
+// on display-only wakes (where WiFi never comes up). 16 chars covers IPv4.
+RTC_DATA_ATTR char   lastKnownIPbuf[16]   = "0.0.0.0";
 
 WebServer server(80);
-ArduinoOTAClass& OTA = ArduinoOTA;
 
 volatile bool ntpSyncCompleted = false;
 void ntpTimeSyncCallback(struct timeval* tv) {
@@ -127,18 +128,29 @@ void loadConfig() {
 void setupWiFi() {
   logInfo("Connecting to WiFi: " + config.ssid);
   WiFi.mode(WIFI_STA);
+  // Modem-sleep between beacons — drops idle WiFi current ~80 mA → ~6 mA.
+  // Adds modest latency to OTA detection but the 8 s window is plenty.
+  WiFi.setSleep(WIFI_PS_MAX_MODEM);
   WiFi.begin(config.ssid.c_str(), config.password.c_str());
+  // 20 attempts × 500 ms = 10 s cap. Failed connects burn ~1300 mAs
+  // on radio idle each — keep the cap tight.
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
+#if !PRODUCTION_MODE
     Serial.print(".");
+#endif
     esp_task_wdt_reset();
     attempts++;
   }
+#if !PRODUCTION_MODE
   Serial.println();
+#endif
   if (WiFi.status() == WL_CONNECTED) {
-    lastKnownIP = WiFi.localIP().toString();
-    logInfo("WiFi connected, IP: " + lastKnownIP);
+    String ip = WiFi.localIP().toString();
+    strncpy(lastKnownIPbuf, ip.c_str(), sizeof(lastKnownIPbuf) - 1);
+    lastKnownIPbuf[sizeof(lastKnownIPbuf) - 1] = '\0';
+    logInfo("WiFi connected, IP: " + ip);
   } else {
     logError("WiFi connection failed.");
   }
@@ -160,11 +172,15 @@ bool setupNTP() {
   int attempts = 0;
   while (!ntpSyncCompleted && attempts < 20) {
     delay(500);
+#if !PRODUCTION_MODE
     Serial.print("T");
+#endif
     esp_task_wdt_reset();
     attempts++;
   }
+#if !PRODUCTION_MODE
   Serial.println();
+#endif
 
   if (ntpSyncCompleted) {
     timeValid = true;
@@ -233,7 +249,7 @@ void renderClock(bool fullRefresh) {
   display.drawLine(8, 250, ScreenWidth - 8, 250, GxEPD_BLACK);
   display.setFont(&FreeMonoBold9pt7b);
   display.setCursor(10, 275);
-  display.print(lastKnownIP);
+  display.print(lastKnownIPbuf);
   display.setCursor(10, 293);
   display.print("v");
   display.print(FIRMWARE_VERSION);
@@ -340,7 +356,7 @@ void runOtaWindow(uint32_t durationMs) {
   ArduinoOTA.begin();
 
   logInfof("OTA window open for %u ms — listening for upload at %s",
-           durationMs, lastKnownIP.c_str());
+           durationMs, lastKnownIPbuf);
 
   uint32_t start = millis();
   while (millis() - start < durationMs) {
@@ -361,6 +377,16 @@ void goToSleep() {
 
   // Hibernate the panel — bistable, retains image at near-zero power.
   display.hibernate();
+
+  // Tear down WiFi explicitly. Deep sleep would do this implicitly, but
+  // calling it here gives the radio a clean shutdown and lets the next wake
+  // reuse a known state.
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+
+  // Release SPI bus pins — otherwise they may stay driven until deep sleep
+  // takes the chip down, which can leak ~100 µA into the panel's RST line.
+  SPI.end();
 
   // Note: ESP32-C6 doesn't expose ESP_PD_DOMAIN_RTC_FAST_MEM. The deep-sleep
   // power manager handles unused RTC memory automatically — no manual config.
@@ -402,15 +428,22 @@ void goToSleep() {
 // Setup / loop
 // ==========================================
 void setup() {
+#if !PRODUCTION_MODE
   Serial.begin(115200);
   delay(300);
   Serial.println();
+#endif
 
   esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
   isColdBoot = (wakeup_cause != ESP_SLEEP_WAKEUP_TIMER);
 
   logInfof("=== WeAct Clock v%s boot (cause=%d, cold=%s) ===",
            FIRMWARE_VERSION, wakeup_cause, isColdBoot ? "yes" : "no");
+
+  // Disable the BLE controller — we never use it. Returns ESP_ERR_INVALID_STATE
+  // if it was never initialized in the first place; harmless either way.
+  esp_bt_controller_disable();
+  esp_bt_controller_deinit();
 
   // Watchdog — long timeout to cover slow WiFi connects (ESP32 core 3.x API).
   esp_task_wdt_config_t wdtCfg = {
@@ -450,6 +483,14 @@ void setup() {
     }
   }
 
+  // Drop to 80 MHz when no radio is needed this wake — halves CPU current
+  // (~25 → ~15 mA) for the dominant minute-tick path.
+  // WiFi/NTP path stays at default 160 MHz; the radio requires it.
+  if (!needSync) {
+    setCpuFrequencyMhz(80);
+    logInfo("CPU @ 80 MHz (display-only wake).");
+  }
+
   // Network bring-up only when needed.
   if (needSync) {
     setupWiFi();
@@ -461,9 +502,11 @@ void setup() {
         syncStartMs = millis();
       }
 
+      // 2 attempts — each setupNTP() already waits up to 10 s. Keeps the
+      // worst-case WiFi-idle window to ~20 s instead of 30.
       bool synced = false;
-      for (int retry = 0; retry < 3 && !synced; retry++) {
-        if (retry > 0) logInfof("NTP retry %d/2", retry);
+      for (int retry = 0; retry < 2 && !synced; retry++) {
+        if (retry > 0) logInfof("NTP retry %d/1", retry);
         synced = setupNTP();
       }
 
@@ -492,21 +535,26 @@ void setup() {
     logInfo("NTP sync skipped this wake.");
   }
 
-  // Bring up the display.
-  setupDisplay(isColdBoot);
-
-  // Decide whether to redraw. Skip if minute hasn't changed (e.g. early wake).
+  // Decide redraw BEFORE touching the panel — avoids a wasted 1.5 s init+resume
+  // on early wakes where the minute hasn't actually rolled over yet (drift
+  // overshoot at the boundary).
   int currentMinute = -1;
   if (timeValid) {
     struct tm ti;
     if (getLocalTime(&ti, 0)) currentMinute = ti.tm_hour * 60 + ti.tm_min;
   }
   bool redraw = (currentMinute != lastDisplayedMinute) || isColdBoot;
+
   if (redraw) {
+    setupDisplay(isColdBoot);
     renderClock(/*fullRefresh=*/isColdBoot);
+    // Hibernate the panel ASAP — keeps it at ~5 µA during the OTA window
+    // instead of ~5 mA in powerOn idle. goToSleep() also calls hibernate(),
+    // double-call is harmless.
+    display.hibernate();
     lastDisplayedMinute = currentMinute;
   } else {
-    logInfo("Minute unchanged — skipping redraw.");
+    logInfo("Minute unchanged — skipping display init+redraw.");
   }
 
   // OTA window only on cold boot (USB plug, hard reset, SW reset).

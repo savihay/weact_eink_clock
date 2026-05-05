@@ -124,10 +124,17 @@ The HW reset line is electrically dead on this WeAct unit (FPC ribbon/PCB issue)
 See [COMMANDS.md](COMMANDS.md) for the full command reference. Quickstart:
 
 ```bash
-./build_scripts/compile.sh
-./build_scripts/upload_usb.sh
-./build_scripts/monitor.sh
+./build_scripts/upload_usb.sh    # builds + flashes via USB
+./build_scripts/monitor.sh       # serial output
 ```
+
+Once the device is on WiFi, OTA flashes are one command:
+
+```bash
+./build_scripts/upload.sh 192.168.x.y    # builds + flashes via OTA
+```
+
+Both upload scripts build first by default; pass `--no-build` to skip.
 
 ## Out of scope
 

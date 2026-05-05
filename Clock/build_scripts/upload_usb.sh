@@ -1,9 +1,17 @@
 #!/bin/bash
-# Upload firmware via USB-CDC (ESP32-C6 native USB / JTAG-Serial).
+# Build + flash via USB-CDC (ESP32-C6 native USB / JTAG-Serial).
+# Pass --no-build (or set NO_BUILD=1) to skip compilation and flash the
+# existing build/Clock.ino.bin as-is.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/config.env"
+
+# Build first unless explicitly opted out — prevents flashing stale binaries.
+if [[ "$1" != "--no-build" && "${NO_BUILD:-0}" != "1" ]]; then
+    "$SCRIPT_DIR/compile.sh"
+    echo ""
+fi
 
 PROJECT_PATH="$SCRIPT_DIR/$PROJECT_DIR"
 BUILD_DIR="$PROJECT_PATH/build"

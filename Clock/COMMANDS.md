@@ -7,20 +7,28 @@ All paths are relative to `Clock/`. Scripts live in `build_scripts/`.
 | Command | What it does |
 |---------|--------------|
 | `./build_scripts/compile.sh` | Compiles the sketch with `arduino-cli` for the C6 FQBN. Output: `build/Clock.ino.bin`. |
-| `./build_scripts/upload_usb.sh` | Auto-detects USB port (`/dev/cu.usbmodem*` then `/dev/cu.usbserial-*`) and flashes. Hard-resets at the end. |
-| `./build_scripts/upload.sh <ip>` | OTA flash via `espota.py`. **Must run within the 8 s OTA window after a cold boot.** Auto-bumps `version.h` patch number on success. |
+| `./build_scripts/upload_usb.sh [--no-build]` | **Builds** (calls `compile.sh`), then flashes via USB. Auto-detects port (`/dev/cu.usbmodem*` then `/dev/cu.usbserial-*`). |
+| `./build_scripts/upload.sh <ip> [--no-build]` | **Builds** (after reachability check), then flashes via OTA. Auto-bumps `version.h` patch on success. **Must run within the 8 s OTA window.** |
 | `./build_scripts/monitor.sh` | Opens the serial monitor at 115200 baud on the same port USB upload uses. Ctrl-C to exit. |
+
+Both `upload_usb.sh` and `upload.sh` build by default. Pass `--no-build` (or set `NO_BUILD=1`) to skip compilation and flash whatever's already in `build/`.
 
 ### Common combinations
 
-Build + USB upload + watch:
+Build + USB upload + watch (the everyday loop):
 ```bash
-./build_scripts/compile.sh && ./build_scripts/upload_usb.sh && ./build_scripts/monitor.sh
+./build_scripts/upload_usb.sh && ./build_scripts/monitor.sh
 ```
 
 Build + OTA upload (replace IP with what `monitor.sh` showed last boot):
 ```bash
-./build_scripts/compile.sh && ./build_scripts/upload.sh 192.168.31.180
+./build_scripts/upload.sh 192.168.31.180
+```
+
+Skip the build (e.g. iterating with the same binary on multiple devices):
+```bash
+./build_scripts/upload_usb.sh --no-build
+./build_scripts/upload.sh 192.168.31.180 --no-build
 ```
 
 Watch a live OTA cycle (terminal A monitoring, terminal B uploading):
