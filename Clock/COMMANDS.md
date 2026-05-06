@@ -40,6 +40,20 @@ Watch a live OTA cycle (terminal A monitoring, terminal B uploading):
 ./build_scripts/upload.sh 192.168.31.180
 ```
 
+## Build flags (in `DebugLog.h`)
+
+```c
+#define DEBUG_MODE      1   // Keep WiFi+OTA on forever, never sleep — fast iteration
+#define PRODUCTION_MODE 1   // Skip Serial entirely — minimum boot time + power
+```
+
+Both default to `0`. Only flip one of them — they're mutually exclusive.
+
+When iterating on OTA:
+1. Set `DEBUG_MODE=1`, USB-flash once.
+2. From then on: edit code → `./build_scripts/upload.sh <ip>` → done. No power-cycle needed.
+3. When you're happy, set `DEBUG_MODE=0` and reflash.
+
 ## Configuration
 
 `build_scripts/config.env`:

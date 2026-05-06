@@ -87,6 +87,7 @@ void renderClock(bool fullRefresh);
 void setupWiFi();
 bool setupNTP();
 void setupWebServer();
+void setupOTA();
 void runOtaWindow(uint32_t durationMs);
 void goToSleep();
 void loadConfig();
@@ -250,7 +251,8 @@ void renderClock(bool fullRefresh) {
   HebrewClock::drawHebrewText(display, hebrewFont, line1.c_str(), rightMargin, y1, GxEPD_BLACK);
   HebrewClock::drawHebrewText(display, hebrewFont, line2.c_str(), rightMargin, y2, GxEPD_BLACK);
 
-  // Footer strip — IP / version / NTP status
+#if DEBUG_MODE
+  // Footer strip — IP / version / NTP / debug indicator (debug builds only)
   display.drawLine(8, 250, ScreenWidth - 8, 250, GxEPD_BLACK);
   display.setFont(&FreeMonoBold9pt7b);
   display.setCursor(10, 275);
@@ -260,6 +262,9 @@ void renderClock(bool fullRefresh) {
   display.print(FIRMWARE_VERSION);
   display.setCursor(ScreenWidth - 80, 275);
   display.print(timeValid ? "NTP OK" : "NTP --");
+  display.setCursor(ScreenWidth - 80, 293);
+  display.print("DEBUG");
+#endif
 
   if (fullRefresh) {
     display.display(false);  // full waveform — clean from any prior content
@@ -331,12 +336,10 @@ void setupWebServer() {
 // ==========================================
 // OTA window
 // ==========================================
-void runOtaWindow(uint32_t durationMs) {
-  if (WiFi.status() != WL_CONNECTED) {
-    logInfo("OTA window skipped — WiFi not connected.");
-    return;
-  }
-
+// Bring up the HTTP server, WebSerial, and ArduinoOTA listener. Idempotent in
+// the sense that callers should only invoke once per boot. Caller must have
+// already brought WiFi up.
+void setupOTA() {
   setupWebServer();
   WebSerial.begin(&server);
 
@@ -362,6 +365,15 @@ void runOtaWindow(uint32_t durationMs) {
     logErrorf("OTA error %u", (unsigned)err);
   });
   ArduinoOTA.begin();
+}
+
+void runOtaWindow(uint32_t durationMs) {
+  if (WiFi.status() != WL_CONNECTED) {
+    logInfo("OTA window skipped — WiFi not connected.");
+    return;
+  }
+
+  setupOTA();
 
   logInfof("OTA window open for %u ms — listening for upload at %s",
            durationMs, lastKnownIPbuf);
@@ -568,17 +580,64 @@ void setup() {
     logInfo("Minute unchanged — skipping display init+redraw.");
   }
 
-  // OTA window only on cold boot (USB plug, hard reset, SW reset).
+#if DEBUG_MODE
+  // Debug mode: keep WiFi + OTA up forever, never deep sleep.
+  // Reflash without power-cycling, watch logs over WebSerial, etc.
+  // setupWiFi() ran via the needSync path; if it failed retry once now.
+  if (WiFi.status() != WL_CONNECTED) {
+    logInfo("DEBUG_MODE: retrying WiFi connect...");
+    setupWiFi();
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    setupOTA();
+    logInfo("DEBUG_MODE active — WiFi+OTA persistent, deep sleep disabled.");
+    logInfof("OTA listener at %s — flash with: ./build_scripts/upload.sh %s",
+             lastKnownIPbuf, lastKnownIPbuf);
+  } else {
+    logError("DEBUG_MODE: WiFi unavailable; OTA disabled.");
+  }
+  // Fall through to loop() — setup() returns here.
+#else
+  // Normal mode: OTA window only on cold boot (USB plug / hard reset / SW reset).
   // On timer wakes we go straight to sleep.
   if (isColdBoot) {
     runOtaWindow(8000);
   }
 
   goToSleep();
+#endif
 }
 
 void loop() {
+#if DEBUG_MODE
+  // Pump network handlers continuously.
+  ArduinoOTA.handle();
+  server.handleClient();
+  WebSerial.loop();
+  esp_task_wdt_reset();
+
+  // Refresh the display when the minute rolls over (mirrors the deep-sleep
+  // path's behaviour, just driven from the run loop instead of cold boot).
+  static int lastMinShown = -1;
+  if (timeValid) {
+    struct tm ti;
+    if (getLocalTime(&ti, 0)) {
+      int curMin = ti.tm_hour * 60 + ti.tm_min;
+      if (curMin != lastMinShown) {
+        if (lastMinShown != -1) {
+          // First update happened in setup(); subsequent ones are partial.
+          setupDisplay(/*initial=*/false);
+          renderClock(/*fullRefresh=*/false);
+          display.hibernate();
+        }
+        lastMinShown = curMin;
+      }
+    }
+  }
+  delay(10);
+#else
   // Unreached — setup() always ends in deep sleep.
   esp_task_wdt_reset();
   delay(100);
+#endif
 }

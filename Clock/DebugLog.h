@@ -8,6 +8,17 @@
 #define PRODUCTION_MODE 0
 #endif
 
+// DEBUG_MODE=1: keep WiFi + OTA up forever, no deep sleep, no time-bounded
+// OTA window. Rebuild + flash without power-cycling. Burns the battery in
+// hours — never enable on a battery build. Mutually exclusive with PRODUCTION_MODE.
+#ifndef DEBUG_MODE
+#define DEBUG_MODE 1
+#endif
+
+#if DEBUG_MODE && PRODUCTION_MODE
+#error "DEBUG_MODE and PRODUCTION_MODE are mutually exclusive"
+#endif
+
 // ============== Log Levels ==============
 enum class LogLevel {
     LOG_ERROR = 0,   // Errors only

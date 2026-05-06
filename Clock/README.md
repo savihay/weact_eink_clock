@@ -136,6 +136,22 @@ Once the device is on WiFi, OTA flashes are one command:
 
 Both upload scripts build first by default; pass `--no-build` to skip.
 
+## Build modes
+
+Two compile-time flags in [`DebugLog.h`](DebugLog.h):
+
+| Flag | Default | Effect |
+|------|---------|--------|
+| `DEBUG_MODE` | `0` | When `1`: WiFi + OTA stay up forever, no deep sleep, no time-bounded OTA window. Reflash without power-cycling, watch logs over WebSerial. **Battery dies in hours — never enable on a battery build.** |
+| `PRODUCTION_MODE` | `0` | When `1`: skip `Serial.begin()` and the 300 ms post-delay; suppress all `Serial.println` in DebugLog. Saves ~340 ms of boot per wake and the USB-Serial-JTAG idle current. WebSerial output unaffected. |
+
+The two are mutually exclusive (`#error` if both `1`).
+
+**Typical use:**
+- Active development → `DEBUG_MODE=1`
+- Quiet operation, USB still attached → both `0` (default)
+- Battery-powered field deployment → `PRODUCTION_MODE=1`
+
 ## Out of scope
 
 - **No battery / no buttons** in this build. Phase 3 candidates.
