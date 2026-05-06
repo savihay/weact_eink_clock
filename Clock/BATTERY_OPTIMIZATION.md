@@ -1,6 +1,8 @@
 # Battery optimization opportunities
 
-There's no battery wired right now (USB-powered DevKitC), but the architecture is already deep-sleep based. This doc surveys what to change *before* the battery goes on, ranked by impact.
+There's no battery wired right now (USB-powered DevKitC), but the architecture is already deep-sleep based. This doc surveys what's been done, what's left, and the hardware mods that matter once a battery actually goes on.
+
+> **Currently `DEBUG_MODE=1`** during development — none of the battery numbers below apply while that flag is set, since debug mode keeps WiFi on continuously. Set `DEBUG_MODE=0` (and ideally `PRODUCTION_MODE=1`) before any battery testing.
 
 ## Power model
 
@@ -179,8 +181,11 @@ It used to be a regular global (`String`) — after a timer wake it reset to `"0
 Was 3 retries × 10 s = up to 30 s of WiFi idle. Dropped to 2 retries → ~20 s worst case.
 Could go further by dropping attempts-per-call to 14 (7 s each) for a 14 s total cap.
 
-### Concern: OTA window has no early exit
-If no OTA upload is requested, we sit for the full 8 s. Could exit after 2 s if no `WStype_CONNECTED` event has fired and no OTA packet has arrived — but ArduinoOTA doesn't expose state cleanly. Lowest-risk approach is just shrinking the window.
+### ✅ OTA window auto-extends during transfer
+`otaInProgress` flag (set by `ArduinoOTA.onStart`) keeps the window loop alive while a transfer is active, so an upload that starts at t=7 s of an 8 s window still completes (otherwise the ~12 s transfer would abort halfway). Cleared by `onEnd` and `onError`.
+
+### Open: OTA window early-exit when idle
+If no OTA upload is requested, we still sit for the full 8 s. Could exit after 2 s of "no traffic" — but ArduinoOTA doesn't expose receive state cleanly. Practical alternative: shrink the window from 8 s → 5 s.
 
 ### ✅ Style fix: dropped redundant `ArduinoOTAClass& OTA = ArduinoOTA;` alias
 
@@ -206,15 +211,18 @@ GxEPD2 docs are inconsistent on what this flag does. We inherited it from HelloW
 
 ### Software-side (handled in firmware)
 
-| Item                              | Status |
-|-----------------------------------|--------|
-| Deep sleep (`esp_deep_sleep`)     | ✅ in use — `goToSleep()` always ends here |
-| Display panel hibernation         | ✅ `display.hibernate()` after every render |
+| Item                                | Status |
+|-------------------------------------|--------|
+| Deep sleep (`esp_deep_sleep`)       | ✅ in use — `goToSleep()` always ends here (default mode) |
+| Display panel hibernation           | ✅ `display.hibernate()` after every render |
 | WiFi explicit teardown before sleep | ✅ `WiFi.disconnect(true) + WIFI_OFF` |
-| SPI bus released before sleep     | ✅ `SPI.end()` |
-| BLE controller disabled           | ✅ `esp_bt_controller_disable()/deinit()` early in `setup()` |
-| USB-Serial-JTAG off                | ✅ via `PRODUCTION_MODE=1` (skips `Serial.begin`) |
-| ADC, touch, ULP                   | Never enabled — fine |
+| WiFi modem-sleep when associated    | ✅ `WiFi.setSleep(WIFI_PS_MAX_MODEM)` |
+| SPI bus released before sleep       | ✅ `SPI.end()` |
+| BLE controller disabled             | ✅ `esp_bt_controller_disable()/deinit()` early in `setup()` |
+| USB-Serial-JTAG off                 | ✅ via `PRODUCTION_MODE=1` (skips `Serial.begin`) |
+| OTA window auto-extends in transfer | ✅ `otaInProgress` flag — no aborted uploads near window end |
+| `lastKnownIP` survives deep sleep   | ✅ `RTC_DATA_ATTR char lastKnownIPbuf[16]` |
+| ADC, touch, ULP                     | Never enabled — fine |
 
 ### Board-side (the ESP32-C6-DevKitC-1 hardware)
 

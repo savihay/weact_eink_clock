@@ -8,7 +8,7 @@ All paths are relative to `Clock/`. Scripts live in `build_scripts/`.
 |---------|--------------|
 | `./build_scripts/compile.sh` | Compiles the sketch with `arduino-cli` for the C6 FQBN. Output: `build/Clock.ino.bin`. |
 | `./build_scripts/upload_usb.sh [--no-build]` | **Builds** (calls `compile.sh`), then flashes via USB. Auto-detects port. **Auto-bumps `version.h` patch on success.** |
-| `./build_scripts/upload.sh <ip> [--no-build]` | **Builds** (after reachability check), then flashes via OTA. **Auto-bumps `version.h` patch on success.** **Must run within the 8 s OTA window.** |
+| `./build_scripts/upload.sh <ip> [--no-build]` | **Builds** (after reachability check), then flashes via OTA. **Auto-bumps `version.h` patch on success.** With `DEBUG_MODE=1`: works any time. With `DEBUG_MODE=0`: must run during the 8 s cold-boot window (auto-extends while a transfer is in progress). |
 | `./build_scripts/monitor.sh` | Opens the serial monitor at 115200 baud on the same port USB upload uses. Ctrl-C to exit. |
 
 Both `upload_usb.sh` and `upload.sh` build by default. Pass `--no-build` (or set `NO_BUILD=1`) to skip compilation and flash whatever's already in `build/`.
@@ -36,9 +36,11 @@ Watch a live OTA cycle (terminal A monitoring, terminal B uploading):
 # Terminal A
 ./build_scripts/monitor.sh
 
-# Terminal B (within 8 s of cold boot)
+# Terminal B
 ./build_scripts/upload.sh 192.168.31.180
 ```
+
+In `DEBUG_MODE=1` this works whenever the device is up. In default mode, run it within the 8 s cold-boot window (the window auto-extends once a transfer starts).
 
 ## Build flags (in `DebugLog.h`)
 
@@ -67,7 +69,9 @@ DEVICE_IP=""    # optional: default IP for upload.sh
 
 If you set `DEVICE_IP` here, you can run `./build_scripts/upload.sh` without an argument.
 
-## HTTP endpoints (during the 8 s OTA window)
+## HTTP endpoints
+
+Available whenever the HTTP server is up — always in `DEBUG_MODE=1`, only during the cold-boot OTA window otherwise.
 
 ```bash
 # Get device status
@@ -115,8 +119,8 @@ arduino-cli compile --fqbn esp32:esp32:esp32c6 --show-properties Clock.ino | gre
 | Symptom | Try |
 |---------|-----|
 | `upload_usb.sh` says "no USB serial port found" | Check the cable is in the **USB** port, not UART. Run `ls /dev/cu.*`. |
-| `upload.sh` says "device not reachable" | Confirm IP via serial; device may have already left the OTA window — power-cycle. |
-| OTA upload stalls at 0 % | OTA window may have closed mid-upload. Power-cycle and start `upload.sh` 1–2 s after WiFi connect log appears. |
+| `upload.sh` says "device not reachable" | If `DEBUG_MODE=0`: device is asleep — power-cycle and try again within ~3 s of the "OTA window open" log. If `DEBUG_MODE=1`: WiFi might be down on the device — check serial. |
+| OTA upload starts but device stops responding | If `DEBUG_MODE=0` and the device sleeps mid-upload: extremely unlikely with the auto-extend logic, but power-cycle and retry. With `DEBUG_MODE=1` this shouldn't happen at all. |
 | Display blank after reflash | Power-cycle. The first refresh after a flash always does a full wipe. |
 | Time wrong by exactly +/- 1 hour | DST transition in the middle of a sync — wait one hour, it self-corrects on next NTP. Or check `TZ_INFO` in `Clock.ino`. |
 | Clock drifts more than ~1 s/min | Check serial for `RTC drift: …` lines — if `driftRateUsPerSec` is way off (>50000), the clamp is hiding the real issue. Most likely PSU noise. |

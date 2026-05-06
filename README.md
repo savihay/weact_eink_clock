@@ -24,9 +24,16 @@ Key facts (carried over from the Phase 1 session):
 
 ```bash
 cd Clock
-./build_scripts/compile.sh
-./build_scripts/upload_usb.sh
-./build_scripts/monitor.sh
+./build_scripts/upload_usb.sh    # builds + flashes via USB
+./build_scripts/monitor.sh       # serial output
 ```
 
-After the device is on WiFi, subsequent flashes can go via OTA — see [Clock/README.md](Clock/README.md).
+Once the device is on WiFi, subsequent flashes go via OTA:
+
+```bash
+./build_scripts/upload.sh 192.168.x.y
+```
+
+See [Clock/README.md](Clock/README.md) for build modes (`DEBUG_MODE` / `PRODUCTION_MODE`), wake/sleep behaviour, NTP schedule, HTTP endpoints, and the file map.
+
+The Clock firmware is **currently in `DEBUG_MODE=1`** for fast OTA iteration — flip [`Clock/DebugLog.h:15`](Clock/DebugLog.h:15) to `0` before any battery work.
