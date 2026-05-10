@@ -295,7 +295,7 @@ static String minutesToHebrew(int minutes) {
   return String(TENS[tens]) + " " + String(VE) + String(ONES_FEM[ones]);
 }
 
-void HebrewClock::getTimeStrings(int hour24, int minute, String &line1, String &line2) {
+void HebrewClock::getTimeText(int hour24, int minute, String &fullText) {
   int hour12 = hour24 % 12;
   if (hour12 == 0) hour12 = 12;
 
@@ -309,27 +309,12 @@ void HebrewClock::getTimeStrings(int hour24, int minute, String &line1, String &
   String minStr = minutesToHebrew(minute);
   String periodStr = getPeriod(hour24);
 
-  // Special case to prevent overflowing lines when both hour and minute are long hyphenated words
-  if (hour24 != 0 && (hour12 == 11 || hour12 == 12) && (minute >= 11 && minute <= 19)) {
-    int hyphenIndex = minStr.indexOf('-');
-    if (hyphenIndex != -1) {
-      String minPart1 = minStr.substring(0, hyphenIndex + 1); 
-      String minPart2 = minStr.substring(hyphenIndex + 1);
-      
-      line1 = hourStr + " " + minPart1;
-      line2 = minPart2 + " " + periodStr;
-      return;
-    }
-  }
-
-  String fullText;
-
   if (minute == 45) {
     // "Quarter to next hour"
     int nextHour24 = (hour24 + 1) % 24;
     int nextHour12 = nextHour24 % 12;
     if (nextHour12 == 0) nextHour12 = 12;
-    
+
     if (nextHour24 == 0) {
       // Quarter to Midnight: רֶבַע לַחֲצוֹת (reva la'chatzot)
       fullText = "\xD7\xA8\xD6\xB6\xD7\x91\xD6\xB7\xD7\xA2 \xD7\x9C\xD6\xB7\xD7\x97\xD6\xB2\xD7\xA6\xD7\x95\xD6\xB9\xD7\xAA";
@@ -347,54 +332,102 @@ void HebrewClock::getTimeStrings(int hour24, int minute, String &line1, String &
       fullText = hourStr + " " + minStr;
     }
   } else {
-    // Standard construction
     if (minute == 0) {
       fullText = hourStr + " " + periodStr;
     } else {
       fullText = hourStr + " " + minStr + " " + periodStr;
     }
   }
+}
 
-  // Calculate UTF-8 logical length (ignoring combining marks) for a string segment
-  auto getLogicalLength = [](const String& s, int startIdx, int endIdx) -> int {
-    int len = 0;
-    const char *p = s.c_str() + startIdx;
-    const char *end = s.c_str() + endIdx;
-    while (p < end && *p) {
-        uint16_t cp = decodeUTF8(p);
-        if (cp == 0) break;
-        // Count base characters, space and hyphens. Ignore Nikud (0x0591-0x05C7)
-        if (cp < 0x0591 || cp > 0x05C7) {
-            len++;
-        }
+// ============================================================================
+// Pixel-balanced line splitting
+// ============================================================================
+//
+// We split a Hebrew time string at spaces or hyphens. Hyphens are kept on the
+// left line so a hyphenated compound number reads naturally as a continued
+// word ("...שמונה-" / "עשרה...").
+//
+// The number of lines is chosen automatically: try 2 first, fall back to 3 if
+// the widest 2-line option doesn't fit. The vast majority of times fit in 2
+// lines; only the long noon/midnight cases (~32% at 28pt) need 3.
+
+namespace {
+
+struct SplitPoint {
+  int   index;       // byte index of the split character
+  bool  keepOnLeft;  // true for hyphen (drop nothing), false for space (drop it)
+};
+
+void collectSplitPoints(const String &text, SplitPoint *out, int &count, int maxCount) {
+  count = 0;
+  for (int i = 0; i < (int)text.length() && count < maxCount; i++) {
+    char c = text[i];
+    if (c == ' ') {
+      out[count++] = { i, false };
+    } else if (c == '-') {
+      out[count++] = { i, true };
     }
-    return len;
-  };
+  }
+}
 
-  // Find the space that best balances the text by visual length
-  int bestDiff = 999;
-  int bestSplitIdx = -1;
-  int totalLen = getLogicalLength(fullText, 0, fullText.length());
+String sliceForLine(const String &text, int start, const SplitPoint &p) {
+  // Take from `start` up to (and possibly including) the split char.
+  return p.keepOnLeft ? text.substring(start, p.index + 1)
+                      : text.substring(start, p.index);
+}
 
-  for (int i=0; i < fullText.length(); i++) {
-    if (fullText[i] == ' ') {
-      int len1 = getLogicalLength(fullText, 0, i);
-      int len2 = getLogicalLength(fullText, i + 1, fullText.length());
-      int diff = abs(len1 - len2);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestSplitIdx = i;
-      }
+} // namespace
+
+void HebrewClock::splitForWidth(const GFXfont *font, const char *utf8str,
+                                int16_t maxWidth,
+                                String &line1, String &line2, String &line3) {
+  String text(utf8str);
+  line1 = text;
+  line2 = "";
+  line3 = "";
+
+  // Cap at 16 split points — far more than any time string produces.
+  SplitPoint pts[16];
+  int n = 0;
+  collectSplitPoints(text, pts, n, 16);
+
+  if (n == 0) return;
+
+  // Try 2 lines: pick split that minimises the widest line.
+  int best2Max = INT16_MAX;
+  int best2Idx = -1;
+  for (int i = 0; i < n; i++) {
+    String l1 = sliceForLine(text, 0, pts[i]);
+    String l2 = text.substring(pts[i].index + 1);
+    int w = max(measureHebrewText(font, l1.c_str()),
+                measureHebrewText(font, l2.c_str()));
+    if (w < best2Max) { best2Max = w; best2Idx = i; }
+  }
+
+  if (best2Max <= maxWidth || n < 2) {
+    line1 = sliceForLine(text, 0, pts[best2Idx]);
+    line2 = text.substring(pts[best2Idx].index + 1);
+    return;
+  }
+
+  // 2 lines don't fit — try 3.
+  int best3Max = INT16_MAX;
+  int best3a = -1, best3b = -1;
+  for (int a = 0; a < n - 1; a++) {
+    for (int b = a + 1; b < n; b++) {
+      String l1  = sliceForLine(text, 0, pts[a]);
+      String mid = sliceForLine(text, pts[a].index + 1, pts[b]);
+      String l3  = text.substring(pts[b].index + 1);
+      int w = max(max(measureHebrewText(font, l1.c_str()),
+                      measureHebrewText(font, mid.c_str())),
+                      measureHebrewText(font, l3.c_str()));
+      if (w < best3Max) { best3Max = w; best3a = a; best3b = b; }
     }
   }
 
-  if (bestSplitIdx != -1) {
-    line1 = fullText.substring(0, bestSplitIdx);
-    line2 = fullText.substring(bestSplitIdx + 1);
-  } else {
-    // Fallback if no space found
-    line1 = fullText;
-    line2 = "";
-  }
+  line1 = sliceForLine(text, 0, pts[best3a]);
+  line2 = sliceForLine(text, pts[best3a].index + 1, pts[best3b]);
+  line3 = text.substring(pts[best3b].index + 1);
 }
 

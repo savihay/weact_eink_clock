@@ -12,7 +12,7 @@
 // OTA window. Rebuild + flash without power-cycling. Burns the battery in
 // hours — never enable on a battery build. Mutually exclusive with PRODUCTION_MODE.
 #ifndef DEBUG_MODE
-#define DEBUG_MODE 1
+#define DEBUG_MODE 0
 #endif
 
 #if DEBUG_MODE && PRODUCTION_MODE

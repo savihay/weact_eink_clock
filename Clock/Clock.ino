@@ -10,7 +10,7 @@
 #include <GxEPD2_BW.h>
 #include <SPI.h>
 #include <Fonts/FreeMonoBold9pt7b.h>
-#include "fonts/NotoSansHebrew24pt.h"
+#include "fonts/NotoSansHebrew28pt.h"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -231,25 +231,41 @@ void renderClock(bool fullRefresh) {
     }
   }
 
-  String line1 = "—", line2 = "";
+  const GFXfont* hebrewFont = &NotoSansHebrew_Bold28pt8b;
+  const int16_t  rightMargin = ScreenWidth - 12;
+  const int16_t  textWidth   = ScreenWidth - 24;  // 12 px margin on each side
+
+  String fullText;
   if (haveTime) {
-    HebrewClock::getTimeStrings(hour, minute, line1, line2);
+    HebrewClock::getTimeText(hour, minute, fullText);
   } else {
-    line1 = "\xD7\x9C\xD7\x9C\xD7\x90 \xD7\xA9\xD7\x81\xD7\xA2\xD7\x95\xD7\x9F"; // "ללא שעון" (no time)
+    fullText = "\xD7\x9C\xD7\x9C\xD7\x90 \xD7\xA9\xD7\x81\xD7\xA2\xD7\x95\xD7\x9F"; // "ללא שעון" (no time)
   }
-  logInfo("Line 1: " + line1);
-  logInfo("Line 2: " + line2);
+
+  String lines[3];
+  HebrewClock::splitForWidth(hebrewFont, fullText.c_str(), textWidth,
+                              lines[0], lines[1], lines[2]);
+  int lineCount = lines[2].length() > 0 ? 3 : (lines[1].length() > 0 ? 2 : 1);
+
+  for (int i = 0; i < lineCount; i++) logInfo("Line " + String(i + 1) + ": " + lines[i]);
 
   // Background clear
   display.fillRect(0, 0, ScreenWidth, ScreenHeight, GxEPD_WHITE);
 
-  // Two big Hebrew lines, right-aligned
-  const GFXfont* hebrewFont = &NotoSansHebrew_Bold24pt8b;
-  int16_t rightMargin = ScreenWidth - 12;
-  int16_t y1 = 110;  // baseline of line 1
-  int16_t y2 = 185;  // baseline of line 2
-  HebrewClock::drawHebrewText(display, hebrewFont, line1.c_str(), rightMargin, y1, GxEPD_BLACK);
-  HebrewClock::drawHebrewText(display, hebrewFont, line2.c_str(), rightMargin, y2, GxEPD_BLACK);
+  // Lay out vertically centered. yAdvance is the font's full line box; using
+  // it as the baseline-to-baseline pitch keeps spacing consistent at 2 or 3.
+  uint8_t yAdv = pgm_read_byte(&hebrewFont->yAdvance);
+  int16_t blockHeight = yAdv * lineCount;
+  int16_t topMargin   = (ScreenHeight - blockHeight) / 2;
+  // Baseline of first line: top of the block + the font's typical ascent.
+  // yAdvance ~= ascent + descent + linegap; ascent is roughly 80 % of yAdv for
+  // this font (matches the existing 24pt layout where y1=110 with yAdv=64).
+  int16_t firstBaseline = topMargin + (yAdv * 4) / 5;
+
+  for (int i = 0; i < lineCount; i++) {
+    HebrewClock::drawHebrewText(display, hebrewFont, lines[i].c_str(),
+                                rightMargin, firstBaseline + i * yAdv, GxEPD_BLACK);
+  }
 
 #if DEBUG_MODE
   // Footer strip — IP / version / NTP / debug indicator (debug builds only)
